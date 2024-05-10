@@ -20,8 +20,8 @@ __global__ void Mat_Mul(float *A,float*B,float*C,int WIDTH,int ComLong)
         Cvalue+=A[row*ComLong+k]*B[k*WIDTH+col];
     }
     C[row*WIDTH+col]=Cvalue;
-}
-
+}g
+aaa
 //使用共享内存的矩阵乘法
 __global__ void Mat_Mul_shard(float *A,float*B,float*C,int WIDTH,int ComLong)
 {
