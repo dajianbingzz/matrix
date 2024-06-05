@@ -76,32 +76,7 @@ __global__ void Mat_Mul_shard_bank(float *A,float*B,float*C,int WIDTH,int ComLon
     C[row*WIDTH+col]=Cvalue;    
 }
 
-// //test使用有bank冲突的共享内存的矩阵乘法
-// __global__ void Mat_Mul_shard_bank(float *A,float*B,float*C,int WIDTH,int ComLong)
-// {
-//     //定义共享内存大小
-//     __shared__ float Ads[BLOCK_WIDTH][BLOCK_WIDTH];
-//     __shared__ float Bds[BLOCK_WIDTH][BLOCK_WIDTH];
-//     //获得行、列
-//     int row=BLOCK_HIGH*blockIdx.y+threadIdx.y;
-//     int col=BLOCK_WIDTH*blockIdx.x+threadIdx.x;
-//     float Cvalue=0;
-//     //
-//     for(int m=0;m<(ComLong+BLOCK_WIDTH-1)/BLOCK_WIDTH;m++)
-//     {
-//         //把数据存入共享内存
-//         Ads[threadIdx.y][threadIdx.x]=A[row*ComLong+(m*BLOCK_WIDTH+threadIdx.x)];
-//         Bds[threadIdx.y][threadIdx.x]=B[(m*BLOCK_WIDTH+threadIdx.y)*WIDTH+col];
-//         __syncthreads();
-//         //计算当前共享block里的行*列
-//         for(int k=0;k<BLOCK_WIDTH;k++)
-//         {
-//         Cvalue+=Ads[threadIdx.y][k]*Bds[k][threadIdx.x];
-//         }
-//          __syncthreads();//这里不同步可能就有线程把后续block里的数据存到shared上，导致取的数据是错的 
-//     }
-//     C[row*WIDTH+col]=Cvalue;    
-// }
+
 // //解决了bank冲突的共享内存的矩阵乘法
 __global__ void Mat_Mul_shard_bank_fix(float *A,float*B,float*C,int WIDTH,int ComLong)
 {
@@ -130,10 +105,11 @@ __global__ void Mat_Mul_shard_bank_fix(float *A,float*B,float*C,int WIDTH,int Co
 }
 int main()
 {
-    const int WIDTH=3096;
-    const int HIGH=3096;
-    const int Xab=3096;
-    //printf("WIDTH=%d\n",WIDTH); 
+    const int WIDTH=512;
+    const int HIGH=512;
+    const int Xab=512;
+    printf("WIDTH=%d\n",WIDTH); 
+    printf("HIGH=%d\n",HIGH); 
    // 定义cpu上的矩阵
     float (*array1_h)[Xab] = (float (*)[Xab])malloc(HIGH * sizeof(float[Xab]));
     // float *array1_h = malloc(WIDTH * sizeof(float[WIDTH]));
@@ -192,18 +168,19 @@ int main()
     cudaMalloc((void**)&array2_d,Xab*WIDTH*sizeof(float));
     cudaMalloc((void**)&result_d,bytes);
     
-
-    //cpu传GPU
-    cudaEventRecord(start);
-    cudaMemcpy(array1_d,array1_h,HIGH*Xab*sizeof(float),cudaMemcpyHostToDevice);
-    cudaMemcpy(array2_d,array2_h,Xab*WIDTH*sizeof(float),cudaMemcpyHostToDevice);
-    
+     
     //定义kernel函数的执行设置
     dim3 blocksize(BLOCK_WIDTH,BLOCK_HIGH,1);
     dim3 gridsize((WIDTH+BLOCK_WIDTH-1)/BLOCK_WIDTH,(WIDTH+BLOCK_HIGH-1)/BLOCK_HIGH,1);
     printf("blocksize.x=%d,blocksize.y=%d,blocksize.z=%d\n",blocksize.x,blocksize.y,blocksize.z);
     printf("gridsize.x=%d,gridsize.y=%d,gridsize.z=%d\n",gridsize.x,gridsize.y,gridsize.z);
-    cudaEventRecord(stop1);
+
+    //cpu传GPU
+    cudaEventRecord(start,0);
+    cudaMemcpy(array1_d,array1_h,HIGH*Xab*sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(array2_d,array2_h,Xab*WIDTH*sizeof(float),cudaMemcpyHostToDevice);
+   
+    cudaEventRecord(stop1,0);
     cudaEventElapsedTime(&elapsedTimecpy,start,stop1);
     printf("cpy time=%d\n",elapsedTimecpy);
    //热身
@@ -269,7 +246,7 @@ int main()
      // //使用bank冲突的共享内存的矩阵乘法
     cudaEventRecord(start,0);
     Mat_Mul_shard_bank<<<gridsize,blocksize>>>(array1_d,array2_d,result_d,WIDTH,Xab);
-        //GPU->CPU
+     //GPU->CPU
     cudaMemcpy(result_h,result_d,bytes,cudaMemcpyDeviceToHost);
     cudaEventRecord(stop2,0);
     cudaEventSynchronize(stop2);
@@ -320,63 +297,68 @@ int main()
     }
     printf("testpass\n");
     //使用共享内存+流的矩阵乘法
-    //  //为了使用流申请的
-    // float *array1_d1;
-    // float *array2_d1;
-    // float *result_d1;
-    // float *array1_d2;
-    // float *array2_d2;
-    // float *result_d2;
-    // cudaHostAlloc((void**)&array1_d1,HIGH*Xab*sizeof(float)/2,cudaHostAllocDefault);
-    // cudaHostAlloc((void**)&array2_d1,Xab*WIDTH*sizeof(float)/2,cudaHostAllocDefault);
-    // cudaHostAlloc((void**)&result_d1,bytes/2,cudaHostAllocDefault);
-    // cudaHostAlloc((void**)&array1_d2,HIGH*Xab*sizeof(float)/2,cudaHostAllocDefault);
-    // cudaHostAlloc((void**)&array2_d2,Xab*WIDTH*sizeof(float)/2,cudaHostAllocDefault);
-    // cudaHostAlloc((void**)&result_d2,bytes/2,cudaHostAllocDefault);
-    // cudaStream_t stream0,stream1;
-    // cudaStreamCreate(&stream0);
-    // cudaStreamCreate(&stream1);
-    // //计算开始
-    // printf("1\n");
-    // //cudaEventRecord(start,0);
-    // cudaMemcpyAsync(array1_d1,array1_h,HIGH*Xab*sizeof(float)/2,cudaMemcpyHostToDevice,stream0);
-    // cudaMemcpyAsync(array1_d2,array1_h+256,HIGH*Xab*sizeof(float)/2,cudaMemcpyHostToDevice,stream1);
-    // cudaMemcpyAsync(array2_d1,array2_h,Xab*WIDTH*sizeof(float)/2,cudaMemcpyHostToDevice,stream0);
-    // //cudaMemcpyAsync(array2_d2,array2_h+(Xab*WIDTH)/2,Xab*WIDTH*sizeof(float)/2,cudaMemcpyHostToDevice,stream1);
-    // dim3 blocksize_1(BLOCK_WIDTH,BLOCK_HIGH,1);
-    // dim3 gridsize_1(((WIDTH+BLOCK_WIDTH-1)/BLOCK_WIDTH)/2,((WIDTH+BLOCK_HIGH-1)/BLOCK_HIGH,1)/2);
-    // printf("2\n");
-    // Mat_Mul_shard<<<gridsize_1,blocksize_1,0,stream0>>>(array1_d1,array2_d1,result_d1,WIDTH,Xab);
-    // //Mat_Mul_shard<<<gridsize_1,blocksize_1,0,stream1>>>(array1_d2,array2_d2,result_d2,WIDTH,Xab);
-    // printf("3\n");
-    // cudaMemcpyAsync(result_h,result_d1,bytes/2,cudaMemcpyDeviceToHost,stream0);
-    // //cudaMemcpyAsync(result_h+WIDTH*HIGH/2,result_d2,bytes/2,cudaMemcpyDeviceToHost,stream1);
-    // printf("4\n");
-    //  // //验证
-    // // printf("result_h[1][1]%f\n",result_h[1][1]);
-    // // printf("result_h[2][1]%f\n",result_h[2][1]);
-    // // printf("result_h[2][2]%f\n",result_h[2][2]);
-    // for(i=0;i<WIDTH;i++)
-    // {
-    //     for(j=0;j<WIDTH;j++)
-    //     {
-    //         if(fabs(test_h[i][j]-result_h[i][j])!=0)
-    //         {
-    //             printf("Result verification failed at element%d\n",i*WIDTH+j);
-    //             exit(EXIT_FAILURE);
-    //         }
-    //     }
-    // }
-    // printf("testpass\n");
-    // cudaStreamSynchronize(stream0);
-    // cudaStreamSynchronize(stream1);
-    // //释放空间
-    // cudaFree(array1_d);
-    // cudaFree(array2_d);
-    // cudaFree(result_d);
-    // cudaFreeHost(array1_h);
-    // cudaFreeHost(array2_h);
-    // cudaFreeHost(result_h);
+//      //为了使用流申请的
+//     float *array1_d1;
+//     float *array2_d1;
+//     float *result_d1;
+//     float *array1_d2;
+//     float *array2_d2;
+//     float *result_d2;
+//    //申请GPU空间
+//     cudaMalloc((void**)&array1_d1,HIGH*Xab*sizeof(float)/2);
+//     cudaMalloc((void**)&array2_d1,Xab*WIDTH*sizeof(float)/2);
+//     cudaMalloc((void**)&result_d1,bytes/2);
+//     cudaMalloc((void**)&array1_d2,HIGH*Xab*sizeof(float)/2);
+//     cudaMalloc((void**)&array2_d2,Xab*WIDTH*sizeof(float)/2);
+//     cudaMalloc((void**)&result_d2,bytes/2);
+//     cudaStream_t stream0,stream1;
+//     cudaStreamCreate(&stream0);
+//     cudaStreamCreate(&stream1);
+//     //计算开始
+//     //printf("1\n");
+//     //cudaEventRecord(start,0);
+//     cudaMemcpyAsync(array1_d1,array1_h[0],HIGH*Xab*sizeof(float)/2,cudaMemcpyHostToDevice,stream0);
+//     cudaMemcpyAsync(array1_d2,array1_h[0]+HIGH*Xab/2,HIGH*Xab*sizeof(float)/2,cudaMemcpyHostToDevice,stream1);
+//     cudaMemcpyAsync(array2_d1,array2_h[0],Xab*WIDTH*sizeof(float)/2,cudaMemcpyHostToDevice,stream0);
+//     cudaMemcpyAsync(array2_d2,array2_h[0]+(Xab*WIDTH)/2,Xab*WIDTH*sizeof(float)/2,cudaMemcpyHostToDevice,stream1);
+//     dim3 blocksize_1(BLOCK_WIDTH,BLOCK_HIGH,1);
+//     dim3 gridsize_1(((WIDTH+BLOCK_WIDTH-1)/BLOCK_WIDTH)/2,((WIDTH+BLOCK_HIGH-1)/BLOCK_HIGH)/2,1);
+//     //printf("2\n");
+//     Mat_Mul_shard<<<gridsize_1,blocksize_1,0,stream0>>>(array1_d1,array2_d1,result_d1,WIDTH,Xab);
+//     Mat_Mul_shard<<<gridsize_1,blocksize_1,0,stream1>>>(array1_d2,array2_d2,result_d2,WIDTH,Xab);
+//    // printf("3\n");
+//     cudaMemcpyAsync(result_h[0],result_d1,bytes/2,cudaMemcpyDeviceToHost,stream0);
+//     cudaMemcpyAsync(result_h[0]+WIDTH*HIGH/2,result_d2,bytes/2,cudaMemcpyDeviceToHost,stream1);
+//    // printf("4\n");
+//      // //验证
+//     printf("test_h[1][1]=%f\n",test_h[1][1]);
+//     printf("test_h[2][1]=%f\n",test_h[2][1]);
+//     printf("test_h[2][2]=%f\n",test_h[2][2]);
+
+//     printf("result_h[1][1]%f\n",result_h[1][1]);
+//     printf("result_h[2][1]%f\n",result_h[2][1]);
+//     printf("result_h[2][2]%f\n",result_h[2][2]);
+//     for(i=0;i<WIDTH;i++)
+//     {
+//         for(j=0;j<WIDTH;j++)
+//         {
+//             if(fabs(test_h[i][j]-result_h[i][j])!=0)
+//             {
+//                 printf("Result verification failed at element%d\n",i*WIDTH+j);
+//                 exit(EXIT_FAILURE);
+//             }
+//         }
+//     }
+//     printf("testpass\n");
+//     cudaStreamSynchronize(stream0);
+//     cudaStreamSynchronize(stream1);
+    //释放空间
+    cudaFree(array1_d);
+    cudaFree(array2_d);
+    cudaFree(result_d);
+    cudaFreeHost(array1_h);
+    cudaFreeHost(array2_h);
+    cudaFreeHost(result_h);
     
     // cudaFreeHost(array1_d1);
     // cudaFreeHost(array2_d1);

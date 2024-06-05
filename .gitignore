@@ -2,3 +2,9 @@
 *.exe
 *.exp
 *.lib
+build/
+*.etl
+*.nvvp
+*.qdrep
+*.sqlite
+add.cu
