@@ -105,7 +105,7 @@ int main()
         cudaMemcpyAsync(c_h+i,c_d,N*sizeof(int),cudaMemcpyDeviceToHost,stream0);
         cudaMemcpyAsync(c_h+i+N,c1_d,N*sizeof(int),cudaMemcpyDeviceToHost,stream1);
     } 
-    cudaStreamSynchronize(stream0);//有什么必要吗？？
+    cudaStreamSynchronize(stream0);
     cudaStreamSynchronize(stream1);
     cudaEventRecord(stop,0);
    // cudaEventSynchronize(stop);
